@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <!-- Bind to your installed WinTAK 5.5 SDK. Your machine shows InstallLocation: C:\Program Files\WinTAK -->
+  <PropertyGroup>
+    <WinTakSdkDir Condition=" '$(WinTakSdkDir)' == '' ">C:\Program Files\WinTAK\</WinTakSdkDir>
+  </PropertyGroup>
+
+  <ItemGroup Condition="Exists('$(WinTakSdkDir)')">
+    <Reference Include="WinTak.Framework">
+      <HintPath>$(WinTakSdkDir)WinTak.Framework.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="WinTak.Common">
+      <HintPath>$(WinTakSdkDir)WinTak.Common.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="WinTak.UI">
+      <HintPath>$(WinTakSdkDir)WinTak.UI.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Prism">
+      <HintPath>$(WinTakSdkDir)Prism.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Prism.MefExtensions">
+      <HintPath>$(WinTakSdkDir)Prism.MefExtensions.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+</Project>
