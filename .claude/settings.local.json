@@ -65,7 +65,8 @@
       "WebFetch(domain:tutorials.techrad.co.za)",
       "Bash(copy \"./WinTAK Plugin (5.0)_AgentManager/bin/x64/Debug/AgentManagerPlugin.dll\" \"%APPDATA%/wintak/plugins/AgentManagerPlugin/\")",
       "Bash(cmd /c xcopy:*)",
-      "Bash(git init:*)"
+      "Bash(git init:*)",
+      "Bash(git remote add:*)"
     ],
     "deny": [],
     "ask": []
