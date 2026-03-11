@@ -52,3 +52,4 @@ _ReSharper*/
 !*.csproj
 !*.sln
 !Directory.Build.props
+qgroundcontrol/

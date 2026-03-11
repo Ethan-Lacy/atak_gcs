@@ -42,26 +42,68 @@ namespace AgentManagerPlugin.Services
             Status = "Disconnected";
         }
 
+        private void SendPacket(byte[] packet)
+        {
+            try
+            {
+                // In client mode (Connected), just send
+                if (_udpClient?.Client?.Connected == true)
+                {
+                    _udpClient.Send(packet, packet.Length);
+                    return;
+                }
+
+                // In listen mode, send to last known sender
+                if (_lastReceivedFrom != null)
+                {
+                    _udpClient.Send(packet, packet.Length, _lastReceivedFrom);
+                    return;
+                }
+
+                System.Diagnostics.Debug.WriteLine("[WARN] No remote endpoint known yet; cannot send packet");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[ERR] SendPacket failed: {ex.Message}");
+            }
+        }
+
         public async Task ConnectAsync(string host = "127.0.0.1", int port = 14550)
+        {
+            await ConnectAsync(port, listenMode: false);
+        }
+
+        public async Task ConnectAsync(int port, bool listenMode = true)
         {
             try
             {
                 Port = port;
                 Status = "Connecting...";
 
-                // Create UDP client that CONNECTS to MAVProxy's udpin server (bidirectional)
-                // MAVProxy must be run with: --out=udpin:0.0.0.0:14551
-                _udpClient = new UdpClient();
-                _remoteEndPoint = new IPEndPoint(IPAddress.Parse(host), port);
-                _udpClient.Connect(_remoteEndPoint); // Connect establishes the remote endpoint
+                if (listenMode)
+                {
+                    // LISTEN mode: Bind to port and wait for MAVProxy to send packets
+                    // MAVProxy must be run with: --out=udp:127.0.0.1:14551
+                    _udpClient = new UdpClient(AddressFamily.InterNetwork);
+                    _udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+                    _udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, port));
 
-                System.Diagnostics.Debug.WriteLine($"Connected UDP client to MAVProxy at {_remoteEndPoint}");
-                System.Diagnostics.Debug.WriteLine($"Make sure MAVProxy is running with: --out=udpin:0.0.0.0:{port}");
+                    System.Diagnostics.Debug.WriteLine($"Listening for MAVLink on UDP 0.0.0.0:{port}");
+                    System.Diagnostics.Debug.WriteLine($"MAVProxy should use: --out=udp:127.0.0.1:{port}");
+                }
+                else
+                {
+                    // CLIENT mode: Connect TO MAVProxy's udpin server
+                    // MAVProxy must be run with: --out=udpin:0.0.0.0:14551
+                    _udpClient = new UdpClient();
+                    _remoteEndPoint = new IPEndPoint(IPAddress.Loopback, port);
+                    _udpClient.Connect(_remoteEndPoint);
 
-                // No separate command client needed - same socket for tx/rx
+                    System.Diagnostics.Debug.WriteLine($"Connected UDP client to MAVProxy at {_remoteEndPoint}");
+                    System.Diagnostics.Debug.WriteLine($"MAVProxy should use: --out=udpin:0.0.0.0:{port}");
+                }
+
                 _commandClient = _udpClient;
-                _commandEndPoint = _remoteEndPoint;
-
                 _cts = new CancellationTokenSource();
 
                 // Start receive loop
@@ -233,7 +275,7 @@ namespace AgentManagerPlugin.Services
                                 var packet = _mavlink.GenerateMAVLinkPacket10(
                                     MAVLink.MAVLINK_MSG_ID.MISSION_REQUEST_INT,
                                     mreq);
-                                _udpClient.Send(packet, packet.Length);
+                                SendPacket(packet);
                                 System.Diagnostics.Debug.WriteLine($"Drone {sysId}: Sent MISSION_REQUEST_INT for waypoint {i}");
                             }
                             break;
@@ -369,8 +411,8 @@ namespace AgentManagerPlugin.Services
                         MAVLink.MAVLINK_MSG_ID.REQUEST_DATA_STREAM,
                         msg);
 
-                    // Send using connected UDP client (no need to specify endpoint)
-                    _udpClient.Send(packet, packet.Length);
+                    // Send using either connected or listen mode
+                    SendPacket(packet);
                 }
             }
             catch (Exception ex)
@@ -419,9 +461,9 @@ namespace AgentManagerPlugin.Services
                         MAVLink.MAVLINK_MSG_ID.MISSION_REQUEST_LIST,
                         msg);
 
-                    // Send using connected UDP client
-                    System.Diagnostics.Debug.WriteLine($"Sending MISSION_REQUEST_LIST packet ({packet.Length} bytes) to {_remoteEndPoint}");
-                    _udpClient.Send(packet, packet.Length);
+                    // Send mission request
+                    System.Diagnostics.Debug.WriteLine($"Sending MISSION_REQUEST_LIST packet ({packet.Length} bytes)");
+                    SendPacket(packet);
 
                     // Wait for MISSION_COUNT response
                     await Task.Delay(TimeoutMs);

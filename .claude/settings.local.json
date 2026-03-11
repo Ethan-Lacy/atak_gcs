@@ -66,7 +66,10 @@
       "Bash(copy \"./WinTAK Plugin (5.0)_AgentManager/bin/x64/Debug/AgentManagerPlugin.dll\" \"%APPDATA%/wintak/plugins/AgentManagerPlugin/\")",
       "Bash(cmd /c xcopy:*)",
       "Bash(git init:*)",
-      "Bash(git remote add:*)"
+      "Bash(git remote add:*)",
+      "Bash(copy:*)",
+      "Bash(cmd /c copy:*)",
+      "Bash(cp:*)"
     ],
     "deny": [],
     "ask": []

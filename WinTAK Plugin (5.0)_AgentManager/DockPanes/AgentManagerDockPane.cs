@@ -118,7 +118,7 @@ namespace AgentManagerPlugin.DockPanes
 
             var connectionInfo = new TextBlock
             {
-                Text = "Connect to MAVProxy UDP output to receive telemetry from all drones",
+                Text = "Listen for MAVLink packets from MAVProxy.\nMAVProxy should use: --out=udp:127.0.0.1:14551",
                 Foreground = Grey150,
                 FontSize = 11,
                 Margin = new Thickness(0, 0, 0, 12),
@@ -145,7 +145,7 @@ namespace AgentManagerPlugin.DockPanes
 
             portTextBox = new TextBox
             {
-                Text = "14550",
+                Text = "14551",
                 Width = 70,
                 Background = Darker,
                 Foreground = White,
@@ -257,7 +257,8 @@ namespace AgentManagerPlugin.DockPanes
                 connectButton.IsEnabled = false;
                 portTextBox.IsEnabled = false;
 
-                await _mavlinkManager.ConnectAsync("127.0.0.1", port);
+                // Use listen mode by default - MAVProxy should use: --out=udp:127.0.0.1:14551
+                await _mavlinkManager.ConnectAsync(port, listenMode: true);
 
                 statusLabel.Text = $"Connected (Port: {port}) - Pkts: {_mavlinkManager.PacketsReceived} Msgs: {_mavlinkManager.MessagesProcessed}";
                 statusLabel.Foreground = OkGreen;
