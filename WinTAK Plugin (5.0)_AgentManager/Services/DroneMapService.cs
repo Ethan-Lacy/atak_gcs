@@ -177,6 +177,35 @@ namespace AgentManagerPlugin.Services
             }
         }
 
+        /// <summary>
+        /// Clear ALL markers for a drone (drone marker + mission markers)
+        /// Used when drone disconnects to clean up map
+        /// </summary>
+        public void ClearAllMarkersForDrone(byte droneId)
+        {
+            try
+            {
+                // Clear mission waypoints and route
+                ClearMissionMarkers(droneId);
+
+                // Clear drone marker
+                if (_droneMarkerUids.ContainsKey(droneId))
+                {
+                    string deleteXml = CreateDeleteCoT(_droneMarkerUids[droneId]);
+                    var xmlDoc = new XmlDocument();
+                    xmlDoc.LoadXml(deleteXml);
+                    _cotSender.Send(xmlDoc);
+                    _droneMarkerUids.Remove(droneId);
+                }
+
+                System.Diagnostics.Debug.WriteLine($"Cleared all markers for Drone {droneId} (disconnected)");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error clearing all markers for drone: {ex.Message}");
+            }
+        }
+
         private string CreateDroneCoT(string uid, byte systemId, double lat, double lon, double alt, double heading, double speed, bool armed, string flightMode, int battery)
         {
             string timeStart = DateTime.UtcNow.ToString("o");

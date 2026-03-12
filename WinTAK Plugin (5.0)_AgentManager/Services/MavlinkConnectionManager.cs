@@ -35,6 +35,9 @@ namespace AgentManagerPlugin.Services
         public int PacketsReceived => _packetsReceived;
         public int MessagesProcessed => _messagesProcessed;
 
+        // Event fired when a drone disconnects (transitions from alive to dead)
+        public event Action<byte> OnDroneDisconnected;
+
         public MavlinkConnectionManager()
         {
             _drones = new Dictionary<byte, DroneState>();
@@ -233,7 +236,19 @@ namespace AgentManagerPlugin.Services
                         case (uint)MAVLink.MAVLINK_MSG_ID.HEARTBEAT:
                             var hb = (MAVLink.mavlink_heartbeat_t)msg.data;
                             drone.Armed = (hb.base_mode & (byte)MAVLink.MAV_MODE_FLAG.SAFETY_ARMED) != 0;
-                            drone.VehicleType = (MAVLink.MAV_TYPE)hb.type; // Store vehicle type
+
+                            // Override: Force FIXED_WING to VTOL_QUADROTOR since these are VTOLs
+                            var reportedType = (MAVLink.MAV_TYPE)hb.type;
+                            if (reportedType == MAVLink.MAV_TYPE.FIXED_WING)
+                            {
+                                drone.VehicleType = MAVLink.MAV_TYPE.VTOL_QUADROTOR;
+                                System.Diagnostics.Debug.WriteLine($"Drone {sysId}: Overriding FIXED_WING to VTOL_QUADROTOR");
+                            }
+                            else
+                            {
+                                drone.VehicleType = reportedType;
+                            }
+
                             drone.FlightMode = ParseFlightMode(hb.custom_mode, drone.VehicleType);
 
                             // Only request mission ONCE on first heartbeat (not periodically)
@@ -526,6 +541,115 @@ namespace AgentManagerPlugin.Services
             }
         }
 
+        /// <summary>
+        /// Check for drone disconnects and fire events
+        /// Should be called periodically (e.g., during UI refresh)
+        /// </summary>
+        public void CheckForDisconnects()
+        {
+            lock (_dronesLock)
+            {
+                foreach (var drone in _drones.Values)
+                {
+                    bool isAliveNow = drone.IsAlive();
+
+                    // Detect transition from alive to dead (disconnect)
+                    if (drone.WasAliveLastCheck && !isAliveNow)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Drone {drone.SystemId} disconnected - firing event");
+                        OnDroneDisconnected?.Invoke(drone.SystemId);
+                    }
+
+                    drone.WasAliveLastCheck = isAliveNow;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Send COMMAND_LONG to drone (MAVLink #76)
+        /// </summary>
+        public void SendCommand(byte systemId, MAVLink.MAV_CMD command,
+            float param1 = 0, float param2 = 0, float param3 = 0,
+            float param4 = 0, float param5 = 0, float param6 = 0, float param7 = 0)
+        {
+            var cmd = new MAVLink.mavlink_command_long_t
+            {
+                target_system = systemId,
+                target_component = 1,
+                command = (ushort)command,
+                confirmation = 0,
+                param1 = param1,
+                param2 = param2,
+                param3 = param3,
+                param4 = param4,
+                param5 = param5,
+                param6 = param6,
+                param7 = param7
+            };
+
+            var packet = _mavlink.GenerateMAVLinkPacket10(
+                MAVLink.MAVLINK_MSG_ID.COMMAND_LONG, cmd);
+            SendPacket(packet);
+
+            System.Diagnostics.Debug.WriteLine(
+                $"Sent command {command} to Drone {systemId}");
+        }
+
+        /// <summary>
+        /// Set flight mode (MAVLink COMMAND_LONG #176 DO_SET_MODE)
+        /// </summary>
+        public void SetMode(byte systemId, string modeName)
+        {
+            // Get numeric mode from vehicle type and mode name
+            uint customMode = GetCustomModeNumber(systemId, modeName);
+
+            SendCommand(systemId, MAVLink.MAV_CMD.DO_SET_MODE,
+                param1: (float)MAVLink.MAV_MODE_FLAG.CUSTOM_MODE_ENABLED,
+                param2: customMode);
+
+            System.Diagnostics.Debug.WriteLine(
+                $"Setting Drone {systemId} to mode {modeName} (custom_mode={customMode})");
+        }
+
+        /// <summary>
+        /// Get custom mode number from mode name based on vehicle type
+        /// </summary>
+        private uint GetCustomModeNumber(byte systemId, string modeName)
+        {
+            var drone = GetDrone(systemId);
+            if (drone == null) return 0;
+
+            var modeMap = (drone.VehicleType == MAVLink.MAV_TYPE.VTOL_DUOROTOR ||
+                          drone.VehicleType == MAVLink.MAV_TYPE.VTOL_QUADROTOR ||
+                          drone.VehicleType == MAVLink.MAV_TYPE.VTOL_TILTROTOR ||
+                          drone.VehicleType == MAVLink.MAV_TYPE.FIXED_WING)
+                ? GetVTOLModes() : GetCopterModes();
+
+            return modeMap.ContainsKey(modeName) ? modeMap[modeName] : 0;
+        }
+
+        /// <summary>
+        /// VTOL/Plane mode map (custom_mode numbers)
+        /// </summary>
+        private Dictionary<string, uint> GetVTOLModes() => new Dictionary<string, uint>
+        {
+            {"MANUAL", 0}, {"CIRCLE", 1}, {"STABILIZE", 2}, {"TRAINING", 3},
+            {"ACRO", 4}, {"FBWA", 5}, {"FBWB", 6}, {"CRUISE", 7},
+            {"AUTO", 10}, {"RTL", 11}, {"LOITER", 12}, {"GUIDED", 15},
+            {"QSTABILIZE", 17}, {"QHOVER", 18}, {"QLOITER", 19}, {"QRTL", 21}
+        };
+
+        /// <summary>
+        /// Copter mode map (custom_mode numbers)
+        /// </summary>
+        private Dictionary<string, uint> GetCopterModes() => new Dictionary<string, uint>
+        {
+            {"STABILIZE", 0}, {"ACRO", 1}, {"ALT_HOLD", 2},
+            {"AUTO", 3}, {"GUIDED", 4}, {"LOITER", 5},
+            {"RTL", 6}, {"CIRCLE", 7}, {"LAND", 9},
+            {"BRAKE", 17}, {"SMART_RTL", 21}
+        };
+
         public void Dispose()
         {
             _cts?.Cancel();
@@ -555,6 +679,7 @@ namespace AgentManagerPlugin.Services
         public DateTime LastMissionRequest { get; set; }
         public int MissionRetryCount { get; set; }
         public int ExpectedWaypointCount { get; set; } // From MISSION_COUNT
+        public bool WasAliveLastCheck { get; set; } // Track previous alive state for disconnect detection
 
         public DroneState()
         {
@@ -564,6 +689,7 @@ namespace AgentManagerPlugin.Services
             MissionRetryCount = 0;
             ExpectedWaypointCount = 0;
             VehicleType = MAVLink.MAV_TYPE.GENERIC; // Default until we receive HEARTBEAT
+            WasAliveLastCheck = false;
         }
 
         public void AddOrUpdateWaypoint(MAVLink.mavlink_mission_item_int_t mi)
